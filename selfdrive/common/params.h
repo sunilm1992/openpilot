@@ -9,7 +9,7 @@ extern "C" {
 
 #define ERR_NO_VALUE -33
 
-int write_db_value(const char* key, const char* value, size_t value_size, bool persistent_param = false);
+int write_db_value(const char* key, const char* value, size_t value_size, bool persistent_param);
 
 // Reads a value from the params database.
 // Inputs:
@@ -22,15 +22,15 @@ int write_db_value(const char* key, const char* value, size_t value_size, bool p
 //                    e.g. for sensor calibration files. Will not be cleared after wipe or re-install.
 //
 // Returns: Negative on failure, otherwise 0.
-int read_db_value(const char* key, char** value, size_t* value_sz, bool persistent_param = false);
+int read_db_value(const char* key, char** value, size_t* value_sz, bool persistent_param);
 
 // Delete a value from the params database.
 // Inputs are the same as read_db_value, without value and value_sz.
-int delete_db_value(const char* key, bool persistent_param = false);
+int delete_db_value(const char* key, bool persistent_param);
 
 // Reads a value from the params database, blocking until successful.
 // Inputs are the same as read_db_value.
-void read_db_value_blocking(const char* key, char** value, size_t* value_sz, bool persistent_param = false);
+void read_db_value_blocking(const char* key, char** value, size_t* value_sz, bool persistent_param);
 
 #ifdef __cplusplus
 }  // extern "C"
@@ -39,7 +39,7 @@ void read_db_value_blocking(const char* key, char** value, size_t* value_sz, boo
 #ifdef __cplusplus
 #include <map>
 #include <string>
-int read_db_all(std::map<std::string, std::string> *params, bool persistent_param = false);
+int read_db_all(std::map<std::string, std::string> *params, bool persistent_param);
 #endif
 
 #endif  // _SELFDRIVE_COMMON_PARAMS_H_

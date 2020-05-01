@@ -135,7 +135,7 @@ static void handle_sidebar_touch(UIState *s, int touch_x, int touch_y) {
 }
 
 static void handle_driver_view_touch(UIState *s, int touch_x, int touch_y) {
-  int err = write_db_value("IsDriverViewEnabled", "0", 1);
+  int err = write_db_value("IsDriverViewEnabled", "0", 1, false);
 }
 
 static void handle_vision_touch(UIState *s, int touch_x, int touch_y) {
