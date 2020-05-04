@@ -4,6 +4,7 @@
 #include "common/visionbuf.h"
 #include "common/visionipc.h"
 #include "common/swaglog.h"
+#include "common/messagehelp.h"
 
 #include "models/driving.h"
 
@@ -48,14 +49,10 @@ void* live_thread(void *arg) {
 
   while (!do_exit) {
     for (auto sock : poller->poll(10)){
-      Message * msg = sock->receive();
+      MessageReader amsg = sock->receive();
+      if (!amsg) continue;
 
-      auto amsg = kj::heapArray<capnp::word>((msg->getSize() / sizeof(capnp::word)) + 1);
-      memcpy(amsg.begin(), msg->getData(), msg->getSize());
-
-      capnp::FlatArrayMessageReader cmsg(amsg);
-      cereal::Event::Reader event = cmsg.getRoot<cereal::Event>();
-
+      auto event = amsg.getEvent();
       if (event.isLiveCalibration()) {
         pthread_mutex_lock(&transform_lock);
 
@@ -80,12 +77,13 @@ void* live_thread(void *arg) {
         run_model = true;
         pthread_mutex_unlock(&transform_lock);
       }
-
-      delete msg;
     }
 
   }
 
+  delete live_calibration_sock;
+  delete poller;
+  delete c;
 
   return NULL;
 }
@@ -121,7 +119,7 @@ int main(int argc, char **argv) {
 
     err = clGetPlatformIDs(sizeof(platform_id)/sizeof(cl_platform_id), platform_id, &num_platforms);
     assert(err == 0);
-    
+
     #ifdef QCOM
       int clPlatform = 0;
     #else
@@ -163,7 +161,7 @@ int main(int argc, char **argv) {
     VisionStreamBufs buf_info;
     err = visionstream_init(&stream, VISION_STREAM_YUV, true, &buf_info);
     if (err) {
-      printf("visionstream connect fail\n");
+      LOGW("visionstream connect failed");
       usleep(100000);
       continue;
     }
@@ -180,7 +178,8 @@ int main(int argc, char **argv) {
       VIPCBufExtra extra;
       buf = visionstream_get(&stream, &extra);
       if (buf == NULL) {
-        printf("visionstream get failed\n");
+        LOGW("visionstream get failed");
+        visionstream_destroy(&stream);
         break;
       }
 
@@ -189,24 +188,16 @@ int main(int argc, char **argv) {
       const bool run_model_this_iter = run_model;
       pthread_mutex_unlock(&transform_lock);
 
-      Message *msg = pathplan_sock->receive(true);
-      if (msg != NULL) {
-        // TODO: copy and pasted from camerad/main.cc
-        auto amsg = kj::heapArray<capnp::word>((msg->getSize() / sizeof(capnp::word)) + 1);
-        memcpy(amsg.begin(), msg->getData(), msg->getSize());
-
-        capnp::FlatArrayMessageReader cmsg(amsg);
-        cereal::Event::Reader event = cmsg.getRoot<cereal::Event>();
-
+      MessageReader amsg = pathplan_sock->receive(true);
+      if (amsg) {
         // TODO: path planner timeout?
-        desire = ((int)event.getPathPlan().getDesire()) - 1;
-        delete msg;
+        desire = ((int)amsg.getEvent().getPathPlan().getDesire()) - 1;
       }
 
       double mt1 = 0, mt2 = 0;
       if (run_model_this_iter) {
-        float vec_desire[DESIRE_SIZE] = {0};
-        if (desire >= 0 && desire < DESIRE_SIZE) {
+        float vec_desire[DESIRE_LEN] = {0};
+        if (desire >= 0 && desire < DESIRE_LEN) {
           vec_desire[desire] = 1.0;
         }
 
@@ -236,7 +227,10 @@ int main(int argc, char **argv) {
   visionstream_destroy(&stream);
 
   delete model_sock;
-  
+  delete posenet_sock;
+  delete pathplan_sock;
+  delete msg_context;
+
   model_free(&model);
 
   LOG("joining live_thread");

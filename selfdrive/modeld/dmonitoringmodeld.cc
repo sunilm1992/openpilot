@@ -7,6 +7,7 @@
 #include "common/visionbuf.h"
 #include "common/visionipc.h"
 #include "common/swaglog.h"
+#include "common/messagehelp.h"
 
 #include "models/dmonitoring.h"
 
@@ -28,6 +29,8 @@ int main(int argc, char **argv) {
   // messaging
   Context *msg_context = Context::create();
   PubSocket *dmonitoring_sock = PubSocket::create(msg_context, "driverState");
+  SubSocket *dmonstate_sock = SubSocket::create(msg_context, "dMonitoringState", "127.0.0.1", true);
+  assert(dmonstate_sock != NULL);
 
   // init the models
   DMonitoringModelState dmonitoringmodel;
@@ -46,15 +49,29 @@ int main(int argc, char **argv) {
     LOGW("connected with buffer size: %d", buf_info.buf_len);
 
     double last = 0;
+    int chk_counter = 0;
     while (!do_exit) {
       VIPCBuf *buf;
       VIPCBufExtra extra;
       buf = visionstream_get(&stream, &extra);
       if (buf == NULL) {
         printf("visionstream get failed\n");
+        visionstream_destroy(&stream);
         break;
       }
       //printf("frame_id: %d %dx%d\n", extra.frame_id, buf_info.width, buf_info.height);
+      if (!dmonitoringmodel.is_rhd_checked) {
+        if (chk_counter >= RHD_CHECK_INTERVAL) {
+          MessageReader amsg = dmonstate_sock->receive(true);
+          if (amsg) {
+            auto state = amsg.getEvent().getDMonitoringState();
+            dmonitoringmodel.is_rhd = state.getIsRHD();
+            dmonitoringmodel.is_rhd_checked = state.getRhdChecked();
+          }
+          chk_counter = 0;
+        }
+        chk_counter += 1;
+      }
 
       double t1 = millis_since_boot();
 
@@ -74,6 +91,7 @@ int main(int argc, char **argv) {
   visionstream_destroy(&stream);
 
   delete dmonitoring_sock;
+  delete msg_context;
   dmonitoring_free(&dmonitoringmodel);
 
   return 0;

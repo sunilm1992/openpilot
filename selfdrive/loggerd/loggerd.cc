@@ -36,12 +36,13 @@
 #include "common/visionipc.h"
 #include "common/utilpp.h"
 #include "common/util.h"
+#include "common/messagehelp.h"
 
 #include "logger.h"
 #include "messaging.hpp"
 #include "services.h"
 
-#ifndef QCOM
+#if !(defined(QCOM) || defined(QCOM2))
 // no encoder on PC
 #define DISABLE_ENCODER
 #endif
@@ -137,10 +138,14 @@ void encoder_thread(bool is_streaming, bool raw_clips, bool front) {
     if (!encoder_inited) {
       LOGD("encoder init %dx%d", buf_info.width, buf_info.height);
       encoder_init(&encoder, front ? "dcamera.hevc" : "fcamera.hevc", buf_info.width, buf_info.height, CAMERA_FPS, front ? 2500000 : 5000000, true, false);
+
+      #ifndef QCOM2
+      // TODO: fix qcamera on tici
       if (!front) {
         encoder_init(&encoder_alt, "qcamera.ts", 480, 360, CAMERA_FPS, 128000, false, true);
         has_encoder_alt = true;
       }
+      #endif
       encoder_inited = true;
       if (is_streaming) {
         encoder.zmq_ctx = zmq_ctx_new();
@@ -164,6 +169,7 @@ void encoder_thread(bool is_streaming, bool raw_clips, bool front) {
       VIPCBuf* buf = visionstream_get(&stream, &extra);
       if (buf == NULL) {
         LOG("visionstream get failed");
+        visionstream_destroy(&stream);
         break;
       }
 
@@ -649,21 +655,13 @@ int main(int argc, char** argv) {
   while (!do_exit) {
     for (auto sock : poller->poll(100 * 1000)){
       while (true) {
-        Message * msg = sock->receive(true);
-        if (msg == NULL){
+        MessageReader amsg = sock->receive(true);
+        if (!amsg){
           break;
         }
-
-        uint8_t* data = (uint8_t*)msg->getData();
-        size_t len = msg->getSize();
-
         if (sock == frame_sock) {
+          auto event = amsg.getEvent();
           // track camera frames to sync to encoder
-          auto amsg = kj::heapArray<capnp::word>((len / sizeof(capnp::word)) + 1);
-          memcpy(amsg.begin(), data, len);
-
-          capnp::FlatArrayMessageReader cmsg(amsg);
-          cereal::Event::Reader event = cmsg.getRoot<cereal::Event>();
           if (event.isFrame()) {
             std::unique_lock<std::mutex> lk(s.lock);
             s.last_frame_id = event.getFrame().getFrameId();
@@ -672,8 +670,7 @@ int main(int argc, char** argv) {
           }
         }
 
-        logger_log(&s.logger, data, len, qlog_counter[sock] == 0);
-        delete msg;
+        logger_log(&s.logger, (uint8_t*)amsg.getData(), amsg.getSize(), qlog_counter[sock] == 0);
 
         if (qlog_counter[sock] != -1) {
           //printf("%p: %d/%d\n", socks[i], qlog_counter[socks[i]], qlog_freqs[socks[i]]);
@@ -681,7 +678,7 @@ int main(int argc, char** argv) {
           qlog_counter[sock] %= qlog_freqs[sock];
         }
 
-        bytes_count += len;
+        bytes_count += amsg.getSize();
         msg_count++;
       }
     }
@@ -727,7 +724,8 @@ int main(int argc, char** argv) {
   for (auto s : socks){
     delete s;
   }
-
+  
+  delete poller;
   delete s.ctx;
   return 0;
 }
